@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <title>Chat Application</title>
+    <script src="https://cdn.jsdelivr.net/npm/sockjs-client/dist/sockjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/stompjs/lib/stomp.min.js"></script>
+</head>
+<style>
+    body {
+        font-family: 'Roboto', sans-serif;
+        background-color: #f5f5f5;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+    }
+
+    .main-container {
+        background: #ffffff;
+        border-radius: 12px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        max-width: 900px;
+        width: 100%;
+        padding: 20px;
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+    }
+
+    h2 {
+        color: #004560;
+        margin: 0;
+        font-size: 24px;
+        font-weight: 700;
+    }
+
+    label {
+        font-size: 14px;
+        color: #333;
+        font-weight: 500;
+    }
+
+    input {
+        padding: 8px;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        font-size: 14px;
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    button {
+        padding: 8px 16px;
+        border: none;
+        border-radius: 8px;
+        background: #004560;
+        color: white;
+        font-size: 14px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: background 0.3s ease;
+    }
+
+    button:hover {
+        background: #003147;
+    }
+
+    #chatBox {
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        width: 100%;
+        height: 400px;
+        overflow-y: scroll;
+        padding: 12px;
+        background: #fafafa;
+    }
+
+    .message {
+        margin-bottom: 12px;
+        padding: 8px 12px;
+        border-radius: 8px;
+        max-width: 70%;
+        word-wrap: break-word;
+    }
+
+    .message.sent {
+        background: #7a7c7c;
+        color: white;
+        margin-left: auto;
+    }
+
+    .message.received {
+        background: #e0e0e0;
+        color: #333;
+        margin-right: auto;
+    }
+
+    .message img {
+        max-width: 100%;
+        border-radius: 8px;
+    }
+
+    .message a {
+        color: #004560;
+        text-decoration: none;
+        font-weight: 500;
+    }
+
+    .message a:hover {
+        text-decoration: underline;
+    }
+
+    .input-container {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+    }
+
+    .file-input-container {
+        display: flex;
+        gap: 8px;
+        margin-top: 8px;
+    }
+
+    .file-input-container input[type="file"] {
+        display: none;
+    }
+
+    .file-input-container label {
+        padding: 8px 16px;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        background: #f5f5f5;
+        cursor: pointer;
+        font-size: 14px;
+        color: #333;
+        transition: background 0.3s ease;
+    }
+
+    .file-input-container label:hover {
+        background: #e0e0e0;
+    }
+</style>
+<body>
+<div class="main-container">
+    <h2>Chat Application</h2>
+
+    <label for="senderId">Enter Sender ID:</label>
+    <input type="number" id="senderId" value="2" placeholder="Sender ID">
+    <br>
+
+    <label for="receiverId">Enter Receiver ID:</label>
+    <div class="input-container">
+        <input type="number" id="receiverId" placeholder="Receiver ID">
+        <button onclick="loadConversation()">Load Chat</button>
+    </div>
+
+    <div id="chatBox">
+        <p><strong>Chat History:</strong></p>
+        <div id="chatHistory"></div>
+    </div>
+
+    <div class="input-container">
+        <input type="text" id="messageInput" placeholder="Type your message">
+        <button onclick="sendMessage()">Send</button>
+    </div>
+
+    <div class="file-input-container">
+        <label for="imageInput">Upload Image</label>
+        <input type="file" id="imageInput" accept="image/*">
+        <button onclick="sendImage()">Send Image</button>
+    </div>
+
+    <div class="file-input-container">
+        <label for="pdfInput">Upload PDF</label>
+        <input type="file" id="pdfInput" accept="application/pdf">
+        <button onclick="sendPdf()">Send PDF</button>
+    </div>
+</div>
+<script>
+
+    let senderId = null;
+    let receiverId = null;
+    let stompClient = null;
+    let subscription = null; // ✅ Store subscription reference
+    let messageCache = new Set(); // ✅ Prevent duplicate messages
+
+    // PDF upload function
+    function sendPdf() {
+        const senderId = document.getElementById("senderId").value;
+        const receiverId = document.getElementById("receiverId").value;
+        const pdfInput = document.getElementById("pdfInput");
+
+        if (!senderId || !receiverId || !pdfInput.files[0]) {
+            alert("Enter sender ID, receiver ID, and select a PDF.");
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append("senderId", senderId);
+        formData.append("receiverId", receiverId);
+        formData.append("pdf", pdfInput.files[0]);
+
+        fetch("/api/chat/sendPdf", {
+            method: "POST",
+            body: formData
+        })
+            .then(response => response.json())
+            .then(data => {
+                console.log("PDF sent successfully:", data);
+                pdfInput.value = ""; // Clear the file input
+            })
+            .catch(error => console.error("Error sending PDF:", error));
+    }
+
+    // ✅ Connect WebSocket and Subscribe Dynamically
+    function connectWebSocket() {
+        let newSenderId = document.getElementById("senderId").value;
+
+        if (!newSenderId) {
+            console.error("❌ Sender ID is required before connecting WebSocket!");
+            return;
+        }
+
+        // ✅ If the sender ID has changed, update subscription
+        if (stompClient && stompClient.connected && senderId !== newSenderId) {
+            console.log(`🔄 Changing WebSocket subscription from User ${senderId} to User ${newSenderId}`);
+            unsubscribeFromPreviousQueue(); // ✅ Unsubscribe before subscribing again
+        }
+
+        senderId = newSenderId; // ✅ Update senderId
+
+        if (!stompClient) {
+            let socket = new SockJS('http://localhost:8081/ws');
+            stompClient = Stomp.over(socket);
+            stompClient.connect({}, function (frame) {
+                console.log('✅ Connected to WebSocket:', frame);
+                subscribeToUserQueue(senderId); // ✅ Subscribe once connected
+            }, function (error) {
+                console.error("❌ WebSocket connection error:", error);
+                setTimeout(connectWebSocket, 5000); // Auto-reconnect after 5 sec
+            });
+        } else {
+            subscribeToUserQueue(senderId); // ✅ Subscribe to new user queue dynamically
+        }
+    }
+
+    // ✅ Subscribe to a User's Private Queue
+    function subscribeToUserQueue(userId) {
+        if (!stompClient || !stompClient.connected) {
+            console.error("❌ WebSocket not connected. Subscription failed.");
+            return;
+        }
+
+        if (subscription) {
+            console.warn("⚠ Already subscribed, skipping duplicate subscription.");
+            return;
+        }
+
+        console.log(`📡 Subscribing to /user/${userId}/queue/messages`);
+        subscription = stompClient.subscribe(`/user/${userId}/queue/messages`, function (message) {
+                let msg = JSON.parse(message.body);
+
+                if (!messageCache.has(msg.id)) {
+                    messageCache.add(msg.id);
+                    displayMessage(msg.senderId, msg.encryptedContent, msg.encryptedImage, msg.encryptedPdf); // Pass decrypted image and PDF data
+                }
+            }
+        );
+    }
+
+    // ✅ Unsubscribe from the Previous Queue
+    function unsubscribeFromPreviousQueue() {
+        if (subscription) {
+            console.log("🔌 Unsubscribing from previous WebSocket queue...");
+            subscription.unsubscribe();
+            subscription = null; // ✅ Clear subscription reference
+        }
+    }
+
+    //send image
+    // Image upload function
+    function sendImage() {
+        const senderId = document.getElementById("senderId").value;
+        const receiverId = document.getElementById("receiverId").value;
+        const imageInput = document.getElementById("imageInput");
+
+        if (!senderId || !receiverId || !imageInput.files[0]) {
+            alert("Enter sender ID, receiver ID, and select an image.");
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append("senderId", senderId);
+        formData.append("receiverId", receiverId);
+        formData.append("image", imageInput.files[0]);
+
+        fetch("/api/chat/sendImage", {
+            method: "POST",
+            body: formData
+        })
+            .then(response => response.json())
+            .then(data => {
+                console.log("Image sent successfully:", data);
+                imageInput.value = ""; // Clear the file input
+            })
+            .catch(error => console.error("Error sending image:", error));
+    }
+
+
+    // ✅ Load conversation history dynamically
+    function loadConversation() {
+        receiverId = document.getElementById("receiverId").value;
+        senderId = document.getElementById("senderId").value;
+
+        if (!receiverId || !senderId) {
+            alert("Please enter both Sender ID and Receiver ID.");
+            return;
+        }
+
+        fetch(`/api/chat/conversation/${receiverId}?senderId=${senderId}`)
+            .then(response => response.json())
+            .then(data => {
+                console.log("Conversation Data:", data);  // ✅ Debug log
+                data.forEach(msg => {
+                    console.log("Image Data:", msg.encryptedImage);  // ✅ Debug log
+                    displayMessage(msg.senderId, msg.encryptedContent, msg.encryptedImage, msg.encryptedPdf);
+                });
+            })
+            .catch(error => console.error('❌ Error loading conversation:', error));
+    }
+
+    // ✅ Send a message via WebSocket
+    function sendMessage() {
+        senderId = document.getElementById("senderId").value;
+        receiverId = document.getElementById("receiverId").value;
+        let message = document.getElementById("messageInput").value;
+
+        if (!senderId || !receiverId || !message) {
+            alert("Enter sender ID, receiver ID, and message.");
+            return;
+        }
+
+        const messageObj = {
+            senderId: parseInt(senderId),
+            receiverId: parseInt(receiverId),
+            encryptedContent: message
+        };
+
+        stompClient.send("/app/sendMessage", {}, JSON.stringify(messageObj));
+
+        document.getElementById("messageInput").value = "";
+    }
+
+    // ✅ Display messages dynamically in chat
+    function displayMessage(senderId, messageContent, imageData, pdfData) {
+        console.log("the image is " + imageData)
+        const chatBox = document.getElementById("chatBox");
+        const senderName = senderId == document.getElementById("senderId").value ? "You" : `User ${senderId}`;
+
+        const messageElement = document.createElement("div");
+        messageElement.classList.add("message");
+
+        if (senderName === "You") {
+            messageElement.classList.add("sent");
+        } else {
+            messageElement.classList.add("received");
+        }
+
+        if (imageData) {
+            // If imageData is Base64-encoded, display it directly
+            const imgElement = document.createElement("img");
+            imgElement.src = `data:image/png;base64,${imageData}`; // Use the decrypted Base64 data
+            imgElement.style.maxWidth = "100%";
+            messageElement.appendChild(imgElement);
+        } else if (pdfData) {
+            // If PDF data is present, create a download link
+            const pdfLink = document.createElement("a");
+            pdfLink.href = `data:application/pdf;base64,${pdfData}`;
+            pdfLink.download = `document_${senderId}.pdf`;
+            pdfLink.innerText = "Download PDF";
+            pdfLink.style.color = "black"; // Change the text color to black
+
+            messageElement.appendChild(pdfLink);
+        } else {
+            messageElement.innerHTML = `<strong>${senderName}:</strong> ${messageContent}`;
+        }
+
+        chatBox.appendChild(messageElement);
+        chatBox.scrollTop = chatBox.scrollHeight;
+    }
+
+    // ✅ Detect user changes and re-subscribe
+    document.getElementById("senderId").addEventListener("change", () => {
+        console.log("🔄 Sender ID changed, reconnecting WebSocket...");
+        connectWebSocket();
+    });
+
+    // ✅ Auto-connect WebSocket when the page loads
+    document.addEventListener("DOMContentLoaded", () => {
+        connectWebSocket();
+    });
+
+
+</script>
+</body>
+</html>
