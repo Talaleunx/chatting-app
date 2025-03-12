@@ -2,10 +2,12 @@ package com.example.chat.service;
 
 import com.example.chat.model.Message;
 import com.example.chat.repository.MessageRepository;
+import com.example.chat.repository.UserRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.Base64;
+import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -13,10 +15,12 @@ import java.util.stream.Collectors;
 public class ChatService {
     private final MessageRepository messageRepository;
     private final EncryptionService encryptionService;
+    private final UserRepository userRepository;
 
-    public ChatService(MessageRepository messageRepository, EncryptionService encryptionService) {
+    public ChatService(MessageRepository messageRepository, EncryptionService encryptionService, UserRepository userRepository) {
         this.messageRepository = messageRepository;
         this.encryptionService = encryptionService;
+        this.userRepository = userRepository;
     }
 
     public Message saveMessage(Long senderId, Long receiverId, String content, MultipartFile image, MultipartFile pdf, String timestamp) throws Exception {
@@ -24,7 +28,11 @@ public class ChatService {
         String encryptedImage = image != null ? encryptImage(image) : null;
         String encryptedPdf = pdf != null ? encryptPdf(pdf) : null;
 
-        Message message = new Message(senderId, receiverId, encryptedContent, encryptedImage, encryptedPdf, timestamp);
+        String senderUsername = userRepository.findUsernameById(senderId);
+        String receiverUsername = userRepository.findUsernameById(receiverId);
+
+        Message message = new Message(senderId, receiverId, senderUsername, receiverUsername, encryptedContent, encryptedImage, encryptedPdf, timestamp);
+
         Message savedMessage = messageRepository.save(message);
 
         // Decrypt the message before returning
@@ -62,7 +70,11 @@ public class ChatService {
         List<Message> messagesReceived = messageRepository.findByReceiverIdAndSenderId(userId1, userId2);
 
         messagesSent.addAll(messagesReceived);
-        messagesSent.sort((m1, m2) -> m1.getTimestamp().compareTo(m2.getTimestamp()));
+        messagesSent.sort(Comparator.comparing(Message::getTimestamp));
+
+        // Fetch usernames from DB
+        String senderUsername = userRepository.findUsernameById(userId1);
+        String receiverUsername = userRepository.findUsernameById(userId2);
 
         return messagesSent.stream().map(message -> {
             try {
@@ -75,6 +87,11 @@ public class ChatService {
                 if (message.getEncryptedPdf() != null) {
                     message.setEncryptedPdf(decryptPdf(message.getEncryptedPdf()));
                 }
+
+                // Set usernames dynamically
+                message.setSenderUsername(senderUsername);
+                message.setReceiverUsername(receiverUsername);
+
             } catch (Exception e) {
                 e.printStackTrace();
             }

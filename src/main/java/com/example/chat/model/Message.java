@@ -15,19 +15,46 @@ public class Message {
     private String encryptedPdf; // New field for encrypted PDF data
     private String timestamp;
 
+
+    @Transient // Prevents these fields from being persisted in the database
+    private String senderUsername;
+
+    @Transient
+    private String receiverUsername;
     // Constructors, getters, and setters
     public Message() {}
 
-    public Message(Long senderId, Long receiverId, String encryptedContent, String encryptedImage, String encryptedPdf, String timestamp) {
-        this.senderId = senderId;
-        this.receiverId = receiverId;
-        this.encryptedContent = encryptedContent;
-        this.encryptedImage = encryptedImage;
-        this.encryptedPdf = encryptedPdf;
+
+
+
+    public Message(Long senderId, Long receiverId, String senderUsername, String receiverUsername, String encryptedContent, String encryptedImage, String encryptedPdf, String timestamp) {
+        this.receiverUsername = receiverUsername;
+        this.senderUsername = senderUsername;
         this.timestamp = timestamp;
+        this.encryptedPdf = encryptedPdf;
+        this.encryptedImage = encryptedImage;
+        this.encryptedContent = encryptedContent;
+        this.receiverId = receiverId;
+        this.senderId = senderId;
+        this.id = id;
     }
 
-    // Existing getters and setters...
+    public String getReceiverUsername() {
+        return receiverUsername;
+    }
+
+    public void setReceiverUsername(String receiverUsername) {
+        this.receiverUsername = receiverUsername;
+    }
+
+    public String getSenderUsername() {
+        return senderUsername;
+    }
+
+    public void setSenderUsername(String senderUsername) {
+        this.senderUsername = senderUsername;
+    }
+// Existing getters and setters...
 
     public Long getId() {
         return id;

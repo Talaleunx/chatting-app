@@ -259,16 +259,18 @@
             return;
         }
 
-        console.log(`📡 Subscribing to /user/${userId}/queue/messages`);
-        subscription = stompClient.subscribe(`/user/${userId}/queue/messages`, function (message) {
-                let msg = JSON.parse(message.body);
 
-                if (!messageCache.has(msg.id)) {
-                    messageCache.add(msg.id);
-                    displayMessage(msg.senderId, msg.encryptedContent, msg.encryptedImage, msg.encryptedPdf); // Pass decrypted image and PDF data
-                }
-            }
-        );
+        subscription = stompClient.subscribe(`/user/${senderId}/queue/messages`, function (message) {
+            let msg = JSON.parse(message.body);
+
+            console.log("📩 Received WebSocket Message:", msg); // Debugging
+
+            // Ensure senderUsername is passed
+            displayMessage(msg.senderUsername, msg.encryptedContent, msg.encryptedImage, msg.encryptedPdf);
+        });
+
+
+
     }
 
     // ✅ Unsubscribe from the Previous Queue
@@ -325,9 +327,9 @@
             .then(data => {
                 console.log("Conversation Data:", data);  // ✅ Debug log
                 data.forEach(msg => {
-                    console.log("Image Data:", msg.encryptedImage);  // ✅ Debug log
                     displayMessage(msg.senderId, msg.encryptedContent, msg.encryptedImage, msg.encryptedPdf);
                 });
+
             })
             .catch(error => console.error('❌ Error loading conversation:', error));
     }
@@ -355,10 +357,14 @@
     }
 
     // ✅ Display messages dynamically in chat
-    function displayMessage(senderId, messageContent, imageData, pdfData) {
-        console.log("the image is " + imageData)
+    function displayMessage(senderUsername, messageContent, imageData, pdfData) {
+        console.log("the image is " + imageData);
+        console.log("the username is " + senderUsername);
+
         const chatBox = document.getElementById("chatBox");
-        const senderName = senderId == document.getElementById("senderId").value ? "You" : `User ${senderId}`;
+        const currentUserId = document.getElementById("senderId").value;
+        const senderName = senderUsername === currentUserId ? "You" : senderUsername;
+
 
         const messageElement = document.createElement("div");
         messageElement.classList.add("message");
@@ -370,16 +376,14 @@
         }
 
         if (imageData) {
-            // If imageData is Base64-encoded, display it directly
             const imgElement = document.createElement("img");
-            imgElement.src = `data:image/png;base64,${imageData}`; // Use the decrypted Base64 data
+            imgElement.src = `data:image/png;base64,${imageData}`;
             imgElement.style.maxWidth = "100%";
             messageElement.appendChild(imgElement);
         } else if (pdfData) {
-            // If PDF data is present, create a download link
             const pdfLink = document.createElement("a");
             pdfLink.href = `data:application/pdf;base64,${pdfData}`;
-            pdfLink.download = `document_${senderId}.pdf`;
+            pdfLink.download = `document_${senderUsername}.pdf`;
             pdfLink.innerText = "Download PDF";
             pdfLink.style.color = "black"; // Change the text color to black
 
@@ -391,6 +395,7 @@
         chatBox.appendChild(messageElement);
         chatBox.scrollTop = chatBox.scrollHeight;
     }
+
 
     // ✅ Detect user changes and re-subscribe
     document.getElementById("senderId").addEventListener("change", () => {
